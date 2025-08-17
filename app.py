@@ -109,11 +109,11 @@ def mindpal_reward_webhook():
 @app.route('/create-dated-course', methods=['POST'])
 def create_dated_course():
     data = request.get_json()
-    print("📥 Received payload:", data)  # Log incoming request
+    print("📥 Received payload:", data)
 
     user_id = data.get("user_id")
     final_plan = data.get("final_plan")
-    join_date_str = data.get("join_date")  # Optional: user join date
+    join_date_str = data.get("join_date")  # Optional: user join date in 'YYYY-MM-DD' format
 
     if not user_id or not final_plan:
         print("❌ Missing required data")
@@ -122,41 +122,32 @@ def create_dated_course():
     # Parse join date
     try:
         joined_date = datetime.strptime(join_date_str, "%Y-%m-%d") if join_date_str else datetime.now()
-        print("📅 Parsed join date:", joined_date)
+        print(f"🗓 Using join date: {joined_date}")
     except Exception as e:
-        print("⚠️ Failed to parse join date, using current date. Error:", e)
         joined_date = datetime.now()
+        print(f"⚠️ Failed to parse join date, using now. Error: {e}")
 
-    # Convert final_plan into a dated plan
+    # Convert final_plan into a dated course with tasks as toggles
     dated_plan = {}
     for i, day_key in enumerate(final_plan.get("final_plan", {}), start=0):
         date_str = (joined_date + timedelta(days=i)).strftime("%Y-%m-%d")
         day_data = final_plan["final_plan"][day_key].copy()
-
-        # Convert tasks into toggle-ready objects
         tasks_with_toggle = [{"task": t, "done": False} for t in day_data.get("tasks", [])]
         day_data["tasks"] = tasks_with_toggle
-
         dated_plan[date_str] = day_data
+    print("📄 Dated plan ready:", dated_plan)
 
-    print("📝 Dated plan prepared:", dated_plan)
-
-    # Save to Firebase
+    # Save to Firebase under users/{uid}/datedcourses/{auto_doc_id}
     try:
-        course_id = "social_skills_101"  # You can make this dynamic
-        doc_path = f"dated_courses/{user_id}/{course_id}"
-        print("📌 Writing to Firestore at:", doc_path)
-
-        db.document(doc_path).set({
+        doc_ref = db.collection("users").document(user_id).collection("datedcourses").document()  # Auto-generated doc ID
+        doc_ref.set({
             "joined_date": joined_date.strftime("%Y-%m-%d"),
             "lessons_by_date": dated_plan
         })
-
-        print("✅ Write successful")
+        print(f"✅ Successfully saved dated course for user {user_id}")
         return jsonify({"success": True, "dated_plan": dated_plan})
-
     except Exception as e:
-        print("❌ Failed to write to Firestore:", e)
+        print(f"❌ Failed to save to Firebase: {str(e)}")
         return jsonify({"error": f"Failed to save to Firebase: {str(e)}"}), 500
 
 
@@ -991,6 +982,7 @@ def complete_task():
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 10000))
     app.run(host="0.0.0.0", port=port)
+
 
 
 
