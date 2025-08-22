@@ -106,6 +106,8 @@ def mindpal_reward_webhook():
     return jsonify({"status": "Reward saved successfully"}), 200
 
 
+
+
 @app.route('/create-dated-course', methods=['POST'])
 def create_dated_course():
     data = request.get_json()
@@ -150,6 +152,32 @@ def create_dated_course():
         print(f"❌ Failed to save to Firebase: {str(e)}")
         return jsonify({"error": f"Failed to save to Firebase: {str(e)}"}), 500
 
+
+@app.route('/get-dated-course/<user_id>/<course_id>', methods=['GET'])
+def get_dated_course(user_id, course_id):
+    day_param = request.args.get("day")  # Optional query param: "today"
+    try:
+        doc_path = f"dated_courses/{user_id}/{course_id}"
+        doc = db.document(doc_path).get()
+        if not doc.exists:
+            return jsonify({"error": "Course not found"}), 404
+
+        course_data = doc.to_dict()
+
+        # If ?day=today, filter to today only
+        if day_param == "today":
+            today_str = datetime.now().strftime("%Y-%m-%d")
+            today_lesson = course_data["lessons_by_date"].get(today_str, {})
+            return jsonify({
+                "joined_date": course_data.get("joined_date"),
+                "lessons_by_date": {today_str: today_lesson} if today_lesson else {}
+            })
+
+        # Otherwise, return the entire course
+        return jsonify(course_data)
+
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
 
 
 @app.route('/toggle-task', methods=['POST'])
@@ -982,6 +1010,7 @@ def complete_task():
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 10000))
     app.run(host="0.0.0.0", port=port)
+
 
 
 
