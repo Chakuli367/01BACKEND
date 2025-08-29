@@ -108,14 +108,13 @@ def mindpal_reward_webhook():
 
 
 
-@app.route('/create-dated-course', methods=['POST'])
 def create_dated_course():
     data = request.get_json()
     print("📥 Received payload:", data)
 
     user_id = data.get("user_id")
     final_plan = data.get("final_plan")
-    join_date_str = data.get("join_date")  # Optional: user join date in 'YYYY-MM-DD' format
+    join_date_str = data.get("join_date")  # Optional
 
     if not user_id or not final_plan:
         print("❌ Missing required data")
@@ -129,19 +128,25 @@ def create_dated_course():
         joined_date = datetime.now()
         print(f"⚠️ Failed to parse join date, using now. Error: {e}")
 
-    # Convert final_plan into a dated course with tasks as toggles
+    # Build dated plan with day toggle and unique task IDs
     dated_plan = {}
-    for i, day_key in enumerate(final_plan.get("final_plan", {}), start=0):
+    for i, day_key in enumerate(final_plan, start=0):
         date_str = (joined_date + timedelta(days=i)).strftime("%Y-%m-%d")
-        day_data = final_plan["final_plan"][day_key].copy()
-        tasks_with_toggle = [{"task": t, "done": False} for t in day_data.get("tasks", [])]
-        day_data["tasks"] = tasks_with_toggle
-        dated_plan[date_str] = day_data
-    print("📄 Dated plan ready:", dated_plan)
+        day_data = final_plan[day_key].copy()
 
-    # Save to Firebase under users/{uid}/datedcourses/{auto_doc_id}
+        # Add unique IDs to tasks
+        tasks_with_toggle = [{"id": str(uuid.uuid4()), "task": t, "done": False} 
+                             for t in day_data.get("tasks", [])]
+        day_data["tasks"] = tasks_with_toggle
+
+        # Day-level toggle, initially False
+        day_data["day_done"] = False
+
+        dated_plan[date_str] = day_data
+
+    # Save to Firebase
     try:
-        doc_ref = db.collection("users").document(user_id).collection("datedcourses").document()  # Auto-generated doc ID
+        doc_ref = db.collection("users").document(user_id).collection("datedcourses").document()
         doc_ref.set({
             "joined_date": joined_date.strftime("%Y-%m-%d"),
             "lessons_by_date": dated_plan
@@ -1010,6 +1015,7 @@ def complete_task():
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 10000))
     app.run(host="0.0.0.0", port=port)
+
 
 
 
