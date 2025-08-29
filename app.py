@@ -160,16 +160,17 @@ def create_dated_course():
 
 @app.route('/get-dated-course/<user_id>/<course_id>', methods=['GET'])
 def get_dated_course(user_id, course_id):
-    day_param = request.args.get("day")  # Optional query param: "today"
+    day_param = request.args.get("day")  # Optional: "today"
+
     try:
-        doc_path = f"dated_courses/{user_id}/{course_id}"
-        doc = db.document(doc_path).get()
-        if not doc.exists:
+        course_ref = db.collection("users").document(user_id).collection("datedcourses").document(course_id)
+        course_doc = course_ref.get()
+        if not course_doc.exists:
             return jsonify({"error": "Course not found"}), 404
 
-        course_data = doc.to_dict()
+        course_data = course_doc.to_dict()
 
-        # If ?day=today, filter to today only
+        # If ?day=today, return only today's lesson
         if day_param == "today":
             today_str = datetime.now().strftime("%Y-%m-%d")
             today_lesson = course_data["lessons_by_date"].get(today_str, {})
@@ -184,54 +185,58 @@ def get_dated_course(user_id, course_id):
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
-
+# ----------------------------
+# Toggle task endpoint
+# ----------------------------
 @app.route('/toggle-task', methods=['POST'])
 def toggle_task():
     data = request.get_json()
     user_id = data.get("user_id")
-    day = data.get("day")
+    course_id = data.get("course_id")
+    day_str = data.get("day")        # e.g., "2025-09-01"
     task_index = data.get("task_index")
     completed = data.get("completed")
 
-    if user_id is None or day is None or task_index is None or completed is None:
+    if None in [user_id, course_id, day_str, task_index, completed]:
         return jsonify({"error": "Missing required fields"}), 400
 
-    # Reference to user's task document for the day
-    task_doc_ref = db.collection("users").document(user_id).collection("task_status").document(f"day_{day}")
-    task_doc = task_doc_ref.get()
+    try:
+        # Reference to main dated course
+        course_ref = db.collection("users").document(user_id).collection("datedcourses").document(course_id)
+        course_doc = course_ref.get()
+        if not course_doc.exists:
+            return jsonify({"error": "Course not found"}), 404
 
-    if task_doc.exists:
-        task_data = task_doc.to_dict()
-        tasks_completed = task_data.get("tasks_completed", [])
-    else:
-        # Initialize if not exists
-        tasks_completed = []
+        course_data = course_doc.to_dict()
+        day_data = course_data["lessons_by_date"].get(day_str)
+        if not day_data:
+            return jsonify({"error": "Day not found"}), 404
 
-    # Ensure the tasks_completed array has enough slots
-    while len(tasks_completed) <= task_index:
-        tasks_completed.append(False)
+        # Validate task index
+        if task_index >= len(day_data["tasks"]):
+            return jsonify({"error": "Invalid task index"}), 400
 
-    # Update the specific task's completion
-    tasks_completed[task_index] = completed
+        # Toggle task
+        day_data["tasks"][task_index]["done"] = completed
 
-    # Save back to Firestore
-    task_doc_ref.set({
-        "tasks_completed": tasks_completed,
-        "timestamp": datetime.utcnow()
-    })
+        # Automatically calculate day_done
+        day_data["day_done"] = all(task["done"] for task in day_data["tasks"])
 
-    # Calculate daily progress
-    total_tasks = len(tasks_completed)
-    completed_count = sum(1 for t in tasks_completed if t)
-    daily_progress = completed_count / total_tasks if total_tasks > 0 else 0
+        # Save updated day back to Firebase
+        course_ref.update({
+            f"lessons_by_date.{day_str}": day_data
+        })
 
-    return jsonify({
-        "day": day,
-        "task_index": task_index,
-        "completed": completed,
-        "daily_progress": daily_progress,
-        "tasks_completed": tasks_completed
-    })
+        return jsonify({
+            "day": day_str,
+            "task_index": task_index,
+            "completed": completed,
+            "day_done": day_data["day_done"],
+            "tasks": day_data["tasks"]
+        })
+
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
 
 if __name__ == "__main__":
     app.run(debug=True)
@@ -1015,6 +1020,7 @@ def complete_task():
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 10000))
     app.run(host="0.0.0.0", port=port)
+
 
 
 
